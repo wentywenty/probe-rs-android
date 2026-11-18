@@ -1,40 +1,42 @@
 # probe-rs-android
 
-在 Android 上运行 `probe-rs`，通过 USB 调试探针枚举、连接和烧录 ARM Cortex-M 目标。
+English | [简体中文](README.zh-CN.md)
 
-当前主要用于 **XIAO nRF54LM20A** 的 SWD 烧录验证，也支持 probe-rs 已有的 CMSIS-DAP / J-Link / ST-Link / WCH-Link 等探针。
+Run `probe-rs` on Android to enumerate USB debug probes, attach to ARM Cortex-M targets, and flash firmware over SWD.
 
----
-
-## 状态
-
-已在以下环境实测：
-
-- 手机：Xiaomi 23049RAD8C，Android 15，arm64，KernelSU root
-- 探针：Seeed Studio XIAO nRF54LM20A CMSIS-DAP（`2886:0068`）
-- 目标：XIAO nRF54LM20A
-- 固件：`robopoly-xiao/gateway`，Zephyr `xiao_nrf54lm20a/nrf54lm20a/cpuapp`
-- 结果：probe 枚举、target attach、ELF 烧录均成功
-
-WCH-Link（`1a86:8012`）也能被识别为 CMSIS-DAP 并访问。
+The project was initially validated on a **Seeed Studio XIAO nRF54LM20A** board. It also uses the probe drivers already provided by probe-rs, including CMSIS-DAP, J-Link, ST-Link, and WCH-Link.
 
 ---
 
-## 为什么需要这个仓库
+## Status
 
-`probe-rs` 本身已经支持 CH347、CMSIS-DAP 等探针，但它的 USB 后端 `nusb` 默认关闭了 Android 的 usbfs 枚举和设备打开。
+Validated on:
 
-本仓库提供：
+- Phone: Xiaomi 23049RAD8C, Android 15, arm64, KernelSU root
+- Probe: Seeed Studio XIAO nRF54LM20A CMSIS-DAP (`2886:0068`)
+- Target: XIAO nRF54LM20A
+- Firmware: `robopoly-xiao/gateway`, Zephyr `xiao_nrf54lm20a/nrf54lm20a/cpuapp`
+- Result: probe enumeration, target attach, and ELF flashing succeeded
 
-1. 一个 Android 可执行 CLI：`probe-rs-android`
-2. 一份对 `nusb 0.2.9` 的 Android patch
-3. 可复现的 NDK 构建脚本
-
-没有修改 GKI 内核，也没有依赖 CH347 内核驱动。
+WCH-Link (`1a86:8012`) is also detected as CMSIS-DAP and is accessible.
 
 ---
 
-## 目录
+## Why this repository exists
+
+`probe-rs` already supports CH347, CMSIS-DAP, and other probes, but its USB backend `nusb` disables Android usbfs enumeration and device opening by default.
+
+This repository provides:
+
+1. An Android executable CLI named `probe-rs-android`
+2. An Android patch for `nusb` based on upstream main
+3. A reproducible NDK build script
+
+It does not modify the GKI kernel and does not require a CH347 kernel driver.
+
+---
+
+## Layout
 
 ```text
 .
@@ -50,27 +52,60 @@ WCH-Link（`1a86:8012`）也能被识别为 CMSIS-DAP 并访问。
 
 ---
 
-## 构建
+## Submodules
 
-需要：
+```text
+third_party/probe-rs
+  https://github.com/probe-rs/probe-rs.git
+  d77197c2b3a4063a69f43b6c580234c4a7f81d43
 
-- Rust + Cargo
+third_party/nusb
+  https://github.com/wentywenty/nusb.git
+  9428563d3f9d42240a095b109974de93c22042aa
+```
+
+`third_party/nusb` is based on upstream `nusb` main (`c46ccd0`) plus the Android usbfs patch. The fork is required because upstream main still contains:
+
+```rust
+#[cfg(target_os = "android")]
+pub(crate) fn from_device_info(...) {
+    Blocking::new(move || unimplemented!())
+}
+```
+
+and `list_devices()` still excludes Android.
+
+If upstream merges Android support, the submodule can be switched back to upstream without changing this CLI.
+
+---
+
+## Requirements
+
+- Linux host
+- Rust and Cargo
 - `aarch64-linux-android` target
-- Android NDK 26.1.10909125（或修改脚本中的路径）
-- Git submodule 已初始化
+- Android NDK 26.1.10909125, or adjust the path in the build script
+- Git submodules initialized
 
 ```bash
 rustup target add aarch64-linux-android
+```
+
+---
+
+## Build
+
+```bash
 ./scripts/build.sh
 ```
 
-产物：
+Output:
 
 ```text
 target/aarch64-linux-android/release/probe-rs-android
 ```
 
-也可以手动构建：
+Manual build:
 
 ```bash
 export ANDROID_NDK_HOME=$HOME/android-sdk/ndk/26.1.10909125
@@ -83,24 +118,14 @@ cargo build --target aarch64-linux-android --release
 
 ---
 
-## 初始化子模块
-
-首次 clone 后：
-
-```bash
-git submodule update --init third_party/probe-rs third_party/nusb
-```
-
-或直接运行构建脚本，它会自动初始化这两个 submodule。
-
-## 安装到手机
+## Install on the phone
 
 ```bash
 adb push target/aarch64-linux-android/release/probe-rs-android /data/local/tmp/
 adb shell chmod 755 /data/local/tmp/probe-rs-android
 ```
 
-Android 上需要 root 访问 `/dev/bus/usb`：
+Root is required to access `/dev/bus/usb`:
 
 ```bash
 adb shell su -c '/data/local/tmp/probe-rs-android list'
@@ -108,15 +133,15 @@ adb shell su -c '/data/local/tmp/probe-rs-android list'
 
 ---
 
-## 使用
+## Usage
 
-### 枚举探针
+### List probes
 
 ```bash
 probe-rs-android list
 ```
 
-示例：
+Example:
 
 ```text
 Seeed Studio XIAO nRF54LM20A CMSIS-DAP
@@ -124,7 +149,7 @@ CmsisDapFactory
 Accessible
 ```
 
-### 烧录
+### Flash
 
 ```bash
 probe-rs-android flash \
@@ -134,99 +159,97 @@ probe-rs-android flash \
   --protocol swd
 ```
 
-参数：
+Arguments:
 
 ```text
---chip       probe-rs target 名称，如 nRF54LM20A / SAMD21G18A / nRF52840_xxAA
---file       固件文件
+--chip       probe-rs target name, e.g. nRF54LM20A / SAMD21G18A / nRF52840_xxAA
+--file       firmware file
 --format     elf | hex | bin
 --protocol   swd | jtag
---speed      SWD/JTAG 频率，单位 kHz
---probe      探针选择器，如 2886:0068 或序列号
+--speed      SWD/JTAG clock in kHz
+--probe      probe selector, e.g. 2886:0068 or a serial number
 ```
 
-BIN 需要地址时，当前版本使用目标默认 boot 地址；生产使用建议优先 ELF/HEX。
+For BIN files, the current version uses the target's default boot address. Prefer ELF/HEX for production.
 
 ---
 
-## 保姆教程：从零到烧录
+## Step-by-step tutorial
 
-下面按顺序执行即可。
+### 0. Prerequisites
 
-### 0. 前置条件
-
-- Linux 主机
+- Linux host
 - Rust / Cargo
 - Android NDK 26.1.10909125
-- 已 root 的 Android 手机
-- USB 调试 / ADB 可用
-- CMSIS-DAP、WCH-Link、J-Link 或 ST-Link 等探针
+- Rooted Android phone
+- USB debugging / ADB working
+- CMSIS-DAP, WCH-Link, J-Link, or ST-Link probe
 
-安装 Android Rust target：
+Install the Android Rust target:
 
 ```bash
 rustup target add aarch64-linux-android
 ```
 
-### 1. 克隆仓库和子模块
+### 1. Clone the repository and submodules
 
 ```bash
 git clone --recurse-submodules https://github.com/wentywenty/probe-rs-android.git
 cd probe-rs-android
 ```
 
-如果已经 clone 但没带子模块：
+If already cloned without submodules:
 
 ```bash
 git submodule update --init third_party/probe-rs third_party/nusb
 ```
 
-### 2. 构建 Android CLI
+### 2. Build the Android CLI
 
 ```bash
 export ANDROID_NDK_HOME=$HOME/android-sdk/ndk/26.1.10909125
 ./scripts/build.sh
 ```
 
-产物：
+Output:
 
 ```text
 target/aarch64-linux-android/release/probe-rs-android
 ```
 
-### 3. 连接手机
+### 3. Connect the phone
 
 ```bash
 adb connect 10.43.19.110:5555
 adb devices
 ```
 
-应该看到：
+Expected:
 
 ```text
 10.43.19.110:5555    device
 ```
 
-### 4. 安装 CLI 到手机
+### 4. Install the CLI on the phone
 
 ```bash
 adb push target/aarch64-linux-android/release/probe-rs-android /data/local/tmp/
 adb shell chmod 755 /data/local/tmp/probe-rs-android
 ```
 
-Android 需要 root 访问 USB：
+Android needs root for USB access:
 
 ```bash
 adb shell su -c '/data/local/tmp/probe-rs-android list'
 ```
 
-### 5. 枚举探针
+### 5. Enumerate probes
 
 ```bash
 adb shell su -c '/data/local/tmp/probe-rs-android list'
 ```
 
-正常会看到类似：
+Expected:
 
 ```text
 Seeed Studio XIAO nRF54LM20A CMSIS-DAP
@@ -234,29 +257,33 @@ CmsisDapFactory
 Accessible
 ```
 
-如果没有：
+If nothing is found:
 
-- 检查 USB OTG / 线
-- 检查 `lsusb`
-- 检查 `/dev/bus/usb`
-- 确认 root
+- Check USB OTG / cable
+- Check `lsusb`
+- Check `/dev/bus/usb`
+- Make sure the shell is root
 
-### 6. 编译一个真实固件（可选）
+### 6. Build real firmware (optional)
 
-以 `robopoly-xiao/gateway` 的 XIAO nRF54LM20A 为例：
+Example for `robopoly-xiao/gateway` on XIAO nRF54LM20A:
 
 ```bash
 cd /home/robo/zephyrproject
-west build   -b xiao_nrf54lm20a/nrf54lm20a/cpuapp   /home/robo/roboparty_repo/android/robopoly-xiao/gateway   --pristine   -d /home/robo/roboparty_repo/android/robopoly-xiao/build-nrf54lm20a
+west build \
+  -b xiao_nrf54lm20a/nrf54lm20a/cpuapp \
+  /home/robo/roboparty_repo/android/robopoly-xiao/gateway \
+  --pristine \
+  -d /home/robo/roboparty_repo/android/robopoly-xiao/build-nrf54lm20a
 ```
 
-固件：
+Firmware:
 
 ```text
 build-nrf54lm20a/zephyr/zephyr.elf
 ```
 
-### 7. 烧录
+### 7. Flash
 
 ```bash
 adb push build-nrf54lm20a/zephyr/zephyr.elf /data/local/tmp/xiao.elf
@@ -267,20 +294,20 @@ adb shell su -c '/data/local/tmp/probe-rs-android flash \
   --protocol swd'
 ```
 
-成功输出：
+Success:
 
 ```text
 flashed /data/local/tmp/xiao.elf to nRF54LM20A
 ```
 
-### 8. 常见问题
+### 8. Troubleshooting
 
 #### `no probes found`
 
-- 探针没插好
-- Android 没识别 USB
-- 不是 root
-- `/dev/bus/usb` 不可访问
+- Probe is not connected properly
+- Android did not enumerate the USB device
+- Shell is not root
+- `/dev/bus/usb` is not accessible
 
 #### `permission denied`
 
@@ -288,19 +315,19 @@ flashed /data/local/tmp/xiao.elf to nRF54LM20A
 adb shell su -c 'ls -l /dev/bus/usb/002/*'
 ```
 
-需要 root 或正确的 usbfs 权限。
+Root or correct usbfs permissions are required.
 
 #### `failed to attach`
 
-- `--chip` 名字不对
-- SWDIO/SWCLK/GND 没接对
-- 目标没供电
-- 目标有读保护/调试锁
-- 需要接 NRST
+- Wrong `--chip`
+- SWDIO / SWCLK / GND wiring is wrong
+- Target is not powered
+- Readout protection or debug lock is enabled
+- NRST may be required
 
-#### CH347 没出现
+#### CH347 is not detected
 
-probe-rs 的 CH347 PID 是：
+probe-rs CH347 PIDs:
 
 ```text
 1a86:55dd CH347T
@@ -308,9 +335,9 @@ probe-rs 的 CH347 PID 是：
 1a86:55e8
 ```
 
-如果看到 `1a86:8012`，那是 **WCH-Link**，走 CMSIS-DAP，不是 CH347 backend。
+If you see `1a86:8012`, that is **WCH-Link**, which uses CMSIS-DAP, not the CH347 backend.
 
-#### 子模块没初始化
+#### Submodules are missing
 
 ```bash
 git submodule update --init third_party/probe-rs third_party/nusb
@@ -318,102 +345,73 @@ git submodule update --init third_party/probe-rs third_party/nusb
 
 ---
 
-## Patch 签名
-
-`patches/0001-nusb-android-usbfs.patch` 使用标准 `git format-patch` 格式：
-
-```text
-From: wentywenty <2321901849@qq.com>
-Subject: [PATCH] nusb: add Android usbfs enumeration and device open
-Signed-off-by: wentywenty <2321901849@qq.com>
-```
-
-应用到 nusb：
-
-```bash
-cd nusb
-git am /path/to/0001-nusb-android-usbfs.patch
-```
-
-或只检查：
-
-```bash
-git apply --check /path/to/0001-nusb-android-usbfs.patch
-```
-
-## 依赖版本
-
-`third_party/probe-rs` 固定到：
-
-```text
-d77197c2b3a4063a69f43b6c580234c4a7f81d43
-```
-
-`third_party/nusb` 固定到 `wentywenty/nusb` 的：
-
-```text
-9428563d3f9d42240a095b109974de93c22042aa
-```
-
 ## nusb Android patch
 
-patch：
+Patch:
 
 ```text
 patches/0001-nusb-android-usbfs.patch
 ```
 
-基于 `nusb 0.2.9`，修改：
+Based on upstream `nusb` main plus a single Android commit, the patch changes:
 
-- `src/lib.rs`：Android 启用 `list_devices()` / `request_device()`
-- `src/enumeration.rs`：Android 暴露 Linux 的 `DeviceInfo` / `BusInfo` 字段和方法
-- `src/platform/linux_usbfs/mod.rs`：Android 启用 usbfs enumeration / hotplug
-- `src/platform/linux_usbfs/device.rs`：实现 `/dev/bus/usb/BUS/ADDR` 打开，替换 `unimplemented!()`
+- `src/lib.rs`: enable `list_devices()` / `request_device()` on Android
+- `src/enumeration.rs`: expose Linux `DeviceInfo` / `BusInfo` fields and methods on Android
+- `src/platform/linux_usbfs/mod.rs`: enable usbfs enumeration / hotplug on Android
+- `src/platform/linux_usbfs/device.rs`: open `/dev/bus/usb/BUS/ADDR` instead of `unimplemented!()`
 
-校验：
+Check or apply with:
 
 ```bash
 git apply --check patches/0001-nusb-android-usbfs.patch
+# or
+cd nusb && git am /path/to/0001-nusb-android-usbfs.patch
 ```
 
-> 注意：当前实现走 **Linux usbfs + root**，没有使用 Android USB Host API，因此非 root 环境不可用。  
-> hotplug 代码能编译，但 Android 上的热插拔行为尚未单独验证。
+The patch is authored and signed off by:
+
+```text
+wentywenty <2321901849@qq.com>
+```
+
+> The current implementation uses Linux usbfs with root and does not use the Android USB Host API. It is not usable without root.
+> Hotplug code compiles, but hotplug behavior on Android has not been validated separately.
 
 ---
 
-## 验证记录
+## Validation record
 
-- `probe-rs-android list` 能识别 Seeed XIAO nRF54LM20A CMSIS-DAP
-- `probe-rs-android flash --chip nRF54LM20A` attach 成功
-- `robopoly-xiao/gateway` 的 ELF 已成功烧录到 nRF54LM20A
-- 资源占用：FLASH 5.27%，RAM 3.78%
-
----
-
-## 已知限制
-
-- 仅 root
-- 依赖 `/sys/bus/usb` 和 `/dev/bus/usb`
-- hotplug 未验证
-- 动态链接 bionic，不是完全静态 ELF
-- 尚未实现 probe-rs-tools 的完整 CLI（如 reset、info、gdb server）
-- CH347 原生模式未实测；当前测试使用的是 CMSIS-DAP
-- RP2350 target 尚未在当前 probe-rs 目标库中确认
+- `probe-rs-android list` detects Seeed XIAO nRF54LM20A CMSIS-DAP
+- `probe-rs-android flash --chip nRF54LM20A` attaches successfully
+- `robopoly-xiao/gateway` ELF was flashed to nRF54LM20A successfully
+- Firmware resource usage: FLASH 5.27%, RAM 3.78%
 
 ---
 
-## 后续
+## Known limitations
 
-- 非 root USB Host API + `libusb_wrap_sys_device`
-- 验证 CH347 原生模式
-- 增加 `info` / `reset` / `erase` 子命令
-- 补 RP2350 / 其他 XIAO ARM target
-- 评估完全静态链接
+- Root only
+- Depends on `/sys/bus/usb` and `/dev/bus/usb`
+- Hotplug is not validated
+- Dynamically linked against bionic; not a fully static ELF
+- Full `probe-rs-tools` CLI features such as reset, info, and GDB server are not implemented
+- Native CH347 mode has not been tested; current tests use CMSIS-DAP
+- RP2350 support depends on the pinned probe-rs target database
+
+---
+
+## TODOs
+
+- Non-root access via Android USB Host API + `libusb_wrap_sys_device`
+- Validate native CH347 mode
+- Add `info` / `reset` / `erase` subcommands
+- Add RP2350 and other XIAO ARM targets if missing
+- Evaluate fully static linking
 
 ---
 
 ## License
 
-- `probe-rs`：MIT / Apache-2.0
-- `nusb`：MIT / Apache-2.0
-- 本仓库的 Android patch 与 CLI：MIT / Apache-2.0
+- `probe-rs`: MIT / Apache-2.0
+- `nusb`: MIT / Apache-2.0
+- This repository's Android patch and CLI: MIT / Apache-2.0
