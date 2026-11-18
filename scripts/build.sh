@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 git -C "$ROOT" submodule update --init third_party/probe-rs third_party/nusb
+
+rm -rf "$ROOT/build/nusb"
+mkdir -p "$ROOT/build"
+cp -a "$ROOT/third_party/nusb" "$ROOT/build/nusb"
+rm -rf "$ROOT/build/nusb/.git"
+patch -d "$ROOT/build/nusb" -p1 < "$ROOT/patches/0001-nusb-android-usbfs.patch"
+
 NDK=${ANDROID_NDK_HOME:-$HOME/android-sdk/ndk/26.1.10909125}
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 API=${ANDROID_API:-30}

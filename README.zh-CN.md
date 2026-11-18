@@ -47,7 +47,7 @@ WCH-Link（`1a86:8012`）也能被识别为 CMSIS-DAP 并访问。
 ├── patches/0001-nusb-android-usbfs.patch
 └── third_party/
     ├── probe-rs/           # git submodule, pinned probe-rs
-    └── nusb/               # git submodule, wentywenty/nusb android-usbfs
+    └── nusb/               # git submodule, upstream nusb
 ```
 
 ---
@@ -75,6 +75,13 @@ target/aarch64-linux-android/release/probe-rs-android
 也可以手动构建：
 
 ```bash
+git submodule update --init third_party/probe-rs third_party/nusb
+rm -rf build/nusb
+mkdir -p build
+cp -a third_party/nusb build/nusb
+rm -rf build/nusb/.git
+patch -d build/nusb -p1 < patches/0001-nusb-android-usbfs.patch
+
 export ANDROID_NDK_HOME=$HOME/android-sdk/ndk/26.1.10909125
 export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/bin/aarch64-linux-android30-clang
@@ -351,11 +358,13 @@ git apply --check /path/to/0001-nusb-android-usbfs.patch
 d77197c2b3a4063a69f43b6c580234c4a7f81d43
 ```
 
-`third_party/nusb` 固定到 `wentywenty/nusb` 的：
+`third_party/nusb` 固定到上游 main：
 
 ```text
-9428563d3f9d42240a095b109974de93c22042aa
+c46ccd0183844b6299b5354a4a13d6837d5fcf63
 ```
+
+Android patch 由 `scripts/build.sh` 应用到 `build/nusb` 临时目录，submodule 保持干净。
 
 ## nusb Android patch
 

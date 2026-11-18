@@ -47,7 +47,7 @@ It does not modify the GKI kernel and does not require a CH347 kernel driver.
 ├── patches/0001-nusb-android-usbfs.patch
 └── third_party/
     ├── probe-rs/           # git submodule, pinned probe-rs
-    └── nusb/               # git submodule, wentywenty/nusb android-usbfs
+    └── nusb/               # git submodule, upstream nusb
 ```
 
 ---
@@ -60,11 +60,11 @@ third_party/probe-rs
   d77197c2b3a4063a69f43b6c580234c4a7f81d43
 
 third_party/nusb
-  https://github.com/wentywenty/nusb.git
-  9428563d3f9d42240a095b109974de93c22042aa
+  https://github.com/kevinmehall/nusb.git
+  c46ccd0183844b6299b5354a4a13d6837d5fcf63
 ```
 
-`third_party/nusb` is based on upstream `nusb` main (`c46ccd0`) plus the Android usbfs patch. The fork is required because upstream main still contains:
+`third_party/nusb` is the upstream `nusb` main at `c46ccd0`. The Android usbfs patch is applied to a build copy at `build/nusb` by `scripts/build.sh`; the submodule stays clean. Upstream main still contains:
 
 ```rust
 #[cfg(target_os = "android")]
@@ -75,7 +75,7 @@ pub(crate) fn from_device_info(...) {
 
 and `list_devices()` still excludes Android.
 
-If upstream merges Android support, the submodule can be switched back to upstream without changing this CLI.
+When upstream merges Android support, remove the patch step from the build script; no fork is needed.
 
 ---
 
@@ -108,6 +108,13 @@ target/aarch64-linux-android/release/probe-rs-android
 Manual build:
 
 ```bash
+git submodule update --init third_party/probe-rs third_party/nusb
+rm -rf build/nusb
+mkdir -p build
+cp -a third_party/nusb build/nusb
+rm -rf build/nusb/.git
+patch -d build/nusb -p1 < patches/0001-nusb-android-usbfs.patch
+
 export ANDROID_NDK_HOME=$HOME/android-sdk/ndk/26.1.10909125
 export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/bin/aarch64-linux-android30-clang
