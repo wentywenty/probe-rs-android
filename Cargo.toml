@@ -1,0 +1,12 @@
+[package]
+name = "probe-rs-android"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+probe-rs = { path = "third_party/probe-rs/probe-rs", default-features = false, features = ["builtin-targets", "builtin-formats"] }
+
+[patch.crates-io]
+nusb = { path = "third_party/nusb" }

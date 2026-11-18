@@ -1,0 +1,6 @@
+[submodule "third_party/probe-rs"]
+	path = third_party/probe-rs
+	url = https://github.com/probe-rs/probe-rs.git
+[submodule "third_party/nusb"]
+	path = third_party/nusb
+	url = https://github.com/wentywenty/nusb.git

@@ -1,0 +1,377 @@
+From 9428563d3f9d42240a095b109974de93c22042aa Mon Sep 17 00:00:00 2001
+From: wentywenty <2321901849@qq.com>
+Date: Wed, 18 Nov 2026 11:18:49 +0800
+Subject: [PATCH] nusb: add Android usbfs enumeration and device open
+
+Enable Linux usbfs enumeration on Android, expose the Linux DeviceInfo/BusInfo fields, and implement from_device_info() by opening /dev/bus/usb/BUS/ADDR. This is root-only; it does not use Android USB Host API permissions. Tested on Android 15 with Seeed CMSIS-DAP and WCH-Link.
+
+Signed-off-by: wentywenty <2321901849@qq.com>
+---
+ src/enumeration.rs                 | 61 +++++++++++++++++++++---------
+ src/lib.rs                         | 12 +++++-
+ src/platform/linux_usbfs/device.rs | 26 ++++++++++++-
+ src/platform/linux_usbfs/mod.rs    |  5 ---
+ 4 files changed, 78 insertions(+), 26 deletions(-)
+
+diff --git a/src/enumeration.rs b/src/enumeration.rs
+index f0167fd..a42a9f2 100644
+--- a/src/enumeration.rs
++++ b/src/enumeration.rs
+@@ -2,7 +2,7 @@
+ use std::ffi::{OsStr, OsString};
+ use std::fmt::Debug;
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ use crate::platform::SysfsPath;
+ 
+ #[cfg(target_os = "windows")]
+@@ -32,7 +32,7 @@ pub struct DeviceId(pub(crate) crate::platform::DeviceId);
+ ///     * macOS: `registry_id`, `location_id`
+ #[derive(Clone)]
+ pub struct DeviceInfo {
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     pub(crate) path: SysfsPath,
+ 
+     #[cfg(any(target_os = "linux", target_os = "android"))]
+@@ -62,18 +62,28 @@ pub struct DeviceInfo {
+     #[cfg(target_os = "macos")]
+     pub(crate) location_id: u32,
+ 
+-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows",))]
++    #[cfg(any(
++        target_os = "linux",
++        target_os = "android",
++        target_os = "macos",
++        target_os = "windows",
++    ))]
+     pub(crate) bus_id: String,
+ 
+     #[cfg(any(
+         target_os = "linux",
++        target_os = "android",
+         target_os = "macos",
+         target_os = "windows",
+-        target_os = "android",
+     ))]
+     pub(crate) device_address: u8,
+ 
+-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
++    #[cfg(any(
++        target_os = "linux",
++        target_os = "android",
++        target_os = "macos",
++        target_os = "windows"
++    ))]
+     pub(crate) port_chain: Vec<u8>,
+ 
+     pub(crate) vendor_id: u16,
+@@ -81,6 +91,7 @@ pub struct DeviceInfo {
+ 
+     #[cfg(any(
+         target_os = "linux",
++        target_os = "android",
+         target_os = "macos",
+         target_os = "windows",
+         target_arch = "wasm32"
+@@ -94,9 +105,9 @@ pub struct DeviceInfo {
+ 
+     #[cfg(any(
+         target_os = "linux",
++        target_os = "android",
+         target_os = "macos",
+         target_os = "windows",
+-        target_os = "android",
+     ))]
+     pub(crate) speed: Option<Speed>,
+ 
+@@ -138,7 +149,7 @@ impl DeviceInfo {
+     }
+ 
+     /// *(Linux-only)* Sysfs path for the device.
+-    #[cfg(any(docsrs, target_os = "linux"))]
++    #[cfg(any(docsrs, target_os = "linux", target_os = "android"))]
+     pub fn sysfs_path(&self) -> &std::path::Path {
+         &self.path.0
+     }
+@@ -146,7 +157,7 @@ impl DeviceInfo {
+     /// *(Linux-only)* Bus number.
+     ///
+     /// On Linux, the `bus_id` is an integer and this provides the value as `u8`.
+-    #[cfg(any(docsrs, target_os = "linux"))]
++    #[cfg(any(docsrs, target_os = "linux", target_os = "android"))]
+     pub fn busnum(&self) -> u8 {
+         self.busnum
+     }
+@@ -185,6 +196,7 @@ impl DeviceInfo {
+     #[cfg(any(
+         docsrs,
+         target_os = "linux",
++        target_os = "android",
+         target_os = "macos",
+         target_os = "windows"
+     ))]
+@@ -214,6 +226,7 @@ impl DeviceInfo {
+     #[cfg(any(
+         docsrs,
+         target_os = "linux",
++        target_os = "android",
+         target_os = "macos",
+         target_os = "windows"
+     ))]
+@@ -225,6 +238,7 @@ impl DeviceInfo {
+     #[cfg(any(
+         docsrs,
+         target_os = "linux",
++        target_os = "android",
+         target_os = "macos",
+         target_os = "windows"
+     ))]
+@@ -249,6 +263,7 @@ impl DeviceInfo {
+     #[cfg(any(
+         docsrs,
+         target_os = "linux",
++        target_os = "android",
+         target_os = "macos",
+         target_os = "windows",
+         target_arch = "wasm32"
+@@ -287,6 +302,7 @@ impl DeviceInfo {
+     #[cfg(any(
+         docsrs,
+         target_os = "linux",
++        target_os = "android",
+         target_os = "macos",
+         target_os = "windows"
+     ))]
+@@ -393,7 +409,12 @@ impl std::fmt::Debug for DeviceInfo {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         let mut s = f.debug_struct("DeviceInfo");
+ 
+-        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
++        #[cfg(any(
++            target_os = "linux",
++            target_os = "android",
++            target_os = "macos",
++            target_os = "windows"
++        ))]
+         s.field("bus_id", &self.bus_id)
+             .field("device_address", &self.device_address)
+             .field("port_chain", &format_args!("{:?}", self.port_chain))
+@@ -404,6 +425,7 @@ impl std::fmt::Debug for DeviceInfo {
+ 
+         #[cfg(any(
+             target_os = "linux",
++            target_os = "android",
+             target_os = "macos",
+             target_os = "windows",
+             target_arch = "wasm32"
+@@ -421,7 +443,7 @@ impl std::fmt::Debug for DeviceInfo {
+             .field("product_string", &self.product_string)
+             .field("serial_number", &self.serial_number);
+ 
+-        #[cfg(target_os = "linux")]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         {
+             s.field("sysfs_path", &self.path);
+         }
+@@ -625,18 +647,19 @@ impl UsbControllerType {
+ #[cfg(any(
+     docsrs,
+     target_os = "linux",
++    target_os = "android",
+     target_os = "macos",
+     target_os = "windows"
+ ))]
+ pub struct BusInfo {
+-    #[cfg(any(target_os = "linux"))]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     pub(crate) path: SysfsPath,
+ 
+     /// The phony root hub device
+-    #[cfg(any(target_os = "linux"))]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     pub(crate) root_hub: DeviceInfo,
+ 
+-    #[cfg(any(target_os = "linux"))]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     pub(crate) busnum: u8,
+ 
+     #[cfg(target_os = "windows")]
+@@ -681,12 +704,13 @@ pub struct BusInfo {
+ #[cfg(any(
+     docsrs,
+     target_os = "linux",
++    target_os = "android",
+     target_os = "macos",
+     target_os = "windows"
+ ))]
+ impl BusInfo {
+     /// *(Linux-only)* Sysfs path for the bus.
+-    #[cfg(any(docsrs, target_os = "linux"))]
++    #[cfg(any(docsrs, target_os = "linux", target_os = "android"))]
+     pub fn sysfs_path(&self) -> &std::path::Path {
+         &self.path.0
+     }
+@@ -694,13 +718,13 @@ impl BusInfo {
+     /// *(Linux-only)* Bus number.
+     ///
+     /// On Linux, the `bus_id` is an integer and this provides the value as `u8`.
+-    #[cfg(any(docsrs, target_os = "linux"))]
++    #[cfg(any(docsrs, target_os = "linux", target_os = "android"))]
+     pub fn busnum(&self) -> u8 {
+         self.busnum
+     }
+ 
+     /// *(Linux-only)* The root hub [`DeviceInfo`] representing the bus.
+-    #[cfg(any(docsrs, target_os = "linux"))]
++    #[cfg(any(docsrs, target_os = "linux", target_os = "android"))]
+     pub fn root_hub(&self) -> &DeviceInfo {
+         &self.root_hub
+     }
+@@ -784,7 +808,7 @@ impl BusInfo {
+     /// * macOS: The [IONameMatched](https://developer.apple.com/documentation/bundleresources/information_property_list/ionamematch) key of the IOService entry.
+     /// * Windows: Description field of the root hub device. How the bus will appear in Device Manager.
+     pub fn system_name(&self) -> Option<&str> {
+-        #[cfg(any(target_os = "linux"))]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         {
+             self.root_hub.product_string()
+         }
+@@ -809,6 +833,7 @@ impl BusInfo {
+ #[cfg(any(
+     docsrs,
+     target_os = "linux",
++    target_os = "android",
+     target_os = "macos",
+     target_os = "windows"
+ ))]
+@@ -816,7 +841,7 @@ impl std::fmt::Debug for BusInfo {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         let mut s = f.debug_struct("BusInfo");
+ 
+-        #[cfg(any(target_os = "linux"))]
++        #[cfg(any(target_os = "linux", target_os = "android"))]
+         {
+             s.field("sysfs_path", &self.path);
+             s.field("busnum", &self.busnum);
+diff --git a/src/lib.rs b/src/lib.rs
+index cd11c10..5716e7f 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -226,7 +226,12 @@ mod platform;
+ 
+ pub mod descriptors;
+ mod enumeration;
+-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
++#[cfg(any(
++    target_os = "linux",
++    target_os = "android",
++    target_os = "macos",
++    target_os = "windows"
++))]
+ pub use enumeration::BusInfo;
+ pub use enumeration::{
+     DeviceId, DeviceInfo, DeviceSelector, InterfaceInfo, Speed, UsbControllerType,
+@@ -240,6 +245,7 @@ pub mod transfer;
+ #[cfg(any(
+     docsrs,
+     target_os = "linux",
++    target_os = "android",
+     target_os = "macos",
+     target_os = "windows",
+     target_arch = "wasm32"
+@@ -269,6 +275,7 @@ pub use error::{ActiveConfigurationError, Error, ErrorKind, GetDescriptorError};
+ #[cfg(any(
+     docsrs,
+     target_os = "linux",
++    target_os = "android",
+     target_os = "macos",
+     target_os = "windows",
+     target_arch = "wasm32"
+@@ -306,6 +313,7 @@ pub fn list_devices() -> impl MaybeFuture<Output = Result<impl Iterator<Item = D
+ /// [Transient User Activation]: https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/User_activation
+ #[cfg(any(
+     target_os = "linux",
++    target_os = "android",
+     target_os = "macos",
+     target_os = "windows",
+     target_arch = "wasm32"
+@@ -347,6 +355,7 @@ pub fn request_device(
+ #[cfg(any(
+     docsrs,
+     target_os = "linux",
++    target_os = "android",
+     target_os = "macos",
+     target_os = "windows"
+ ))]
+@@ -392,6 +401,7 @@ pub fn list_buses() -> impl MaybeFuture<Output = Result<impl Iterator<Item = Bus
+ #[cfg(any(
+     docsrs,
+     target_os = "linux",
++    target_os = "android",
+     target_os = "macos",
+     target_os = "windows",
+     target_arch = "wasm32"
+diff --git a/src/platform/linux_usbfs/device.rs b/src/platform/linux_usbfs/device.rs
+index d205123..4e66ed0 100644
+--- a/src/platform/linux_usbfs/device.rs
++++ b/src/platform/linux_usbfs/device.rs
+@@ -111,9 +111,31 @@ impl LinuxDevice {
+ 
+     #[cfg(target_os = "android")]
+     pub(crate) fn from_device_info(
+-        _d: &DeviceInfo,
++        d: &DeviceInfo,
+     ) -> impl MaybeFuture<Output = Result<Arc<LinuxDevice>, Error>> {
+-        Blocking::new(move || unimplemented!())
++        use rustix::fs::{Mode, OFlags};
++
++        let busnum = d.busnum();
++        let devnum = d.device_address();
++
++        Blocking::new(move || {
++            let path = std::path::PathBuf::from(format!("/dev/bus/usb/{busnum:03}/{devnum:03}"));
++            let fd = rustix::fs::open(&path, OFlags::RDWR | OFlags::CLOEXEC, Mode::empty())
++                .map_err(|e| {
++                    match e {
++                        Errno::NOENT => {
++                            Error::new_os(ErrorKind::Disconnected, "device not found", e)
++                        }
++                        Errno::PERM | Errno::ACCESS => {
++                            Error::new_os(ErrorKind::PermissionDenied, "permission denied", e)
++                        }
++                        e => Error::new_os(ErrorKind::Other, "failed to open device", e),
++                    }
++                    .log_debug()
++                })?;
++
++            Self::create_inner(fd)
++        })
+     }
+ 
+     pub(crate) fn from_fd(
+diff --git a/src/platform/linux_usbfs/mod.rs b/src/platform/linux_usbfs/mod.rs
+index 2e83c94..66adbfe 100644
+--- a/src/platform/linux_usbfs/mod.rs
++++ b/src/platform/linux_usbfs/mod.rs
+@@ -6,16 +6,11 @@ use rustix::io::Errno;
+ pub(crate) use transfer::TransferData;
+ mod usbfs;
+ 
+-#[cfg(not(target_os = "android"))]
+ mod enumeration;
+ 
+-#[cfg(not(target_os = "android"))]
+ pub use enumeration::{list_buses, list_devices, SysfsPath};
+ 
+-#[cfg(not(target_os = "android"))]
+ mod hotplug;
+-
+-#[cfg(not(target_os = "android"))]
+ pub(crate) use hotplug::LinuxHotplugWatch as HotplugWatch;
+ 
+ mod events;
+-- 
+2.34.1
+
